@@ -1,0 +1,67 @@
+action Init:
+  # Compaction state
+  compaction_value = {"updated_at": -1, "value": 0}
+  compaction_watermark = 0
+  # Source producer state
+  src_topic = []
+  src_start_ts = 0
+  src_end_ts = 3
+  # Destination producer state
+  dest_topic = []
+  dest_start_ts = 20
+  dest_end_ts = dest_start_ts + 3
+  # Combines topics from both source and destination shards
+  union_topic = []
+  # Possible DB operations, create, update, delete
+  operations = ["C", "U", "D"]
+  # Just some random values for the records
+  values = [5]
+
+# These two actions are the same, will refactor using roles later.
+# Each producer produces to its own topic and the result is combined into a single union topic
+atomic action SourceProduce:
+    if src_start_ts <= src_end_ts:
+        any op in operations:
+            rec = {
+                "op": op,
+                "ts_ms": src_start_ts,
+                "after": values[0]
+            }
+            src_topic.append(rec)
+            union_topic.append(rec)
+        src_start_ts +=1
+
+atomic action DestProduce:
+    if dest_start_ts <= dest_end_ts:
+        any op in operations:
+            rec = {
+                "op": op,
+                "ts_ms": dest_start_ts,
+                "after": values[0]
+            }
+            dest_topic.append(rec)
+            union_topic.append(rec)
+        dest_start_ts +=1
+
+atomic action Compaction:
+    # Run compaction if there is new data since the last time compaction ran
+    # Its basically just looping through and getting the most recent record or applying deletions
+    # It doesn't use a tombstone, so deletions cant be safely applied out of order which is the bug i want to catch in model checking.
+    if len(union_topic) > compaction_watermark:
+        high_watermark = len(union_topic)
+        for rec in union_topic[compaction_watermark:]:
+            if rec["op"] != "D" and  (len(compaction_value) == 0 or rec["ts_ms"] > compaction_value["updated_at"]):
+                compaction_value = {"updated_at": rec["ts_ms"], "value": rec["after"]}
+            else:
+                compaction_value = {}
+        compaction_watermark = high_watermark
+
+eventually always assertion CompactionSerializable:
+    # Assert that the unordered compaction is equal to the serial compaction.
+    serial_compaction_value =  {"updated_at": -1, "value": 0}
+    for rec in (src_topic + dest_topic):
+        if rec["op"] != "D":
+            serial_compaction_value = {"updated_at": rec["ts_ms"], "value": rec["after"]}
+        else:
+            serial_compaction_value = {}
+    return compaction_value == serial_compaction_value
