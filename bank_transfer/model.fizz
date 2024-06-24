@@ -1,0 +1,21 @@
+role Account:
+    action Init:
+        amount = any [1, 2, 3]
+        self.balance = amount
+
+action Init:
+    accounts = []
+    for customer in ["Alice", "Bob"]:
+        accounts.append(Account(name=customer))
+
+action Transfer:
+    transfer_amount = any [1, 2, 3, 4, 5]
+    source_account = any accounts
+    destination_account = any accounts
+
+    if transfer_amount < source_account.balance:
+        source_account.balance -= transfer_amount
+        destination_account.balance += transfer_amount
+
+always assertion NoOverdrafts:
+    return all([account.balance >= 0 for account in accounts])

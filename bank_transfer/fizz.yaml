@@ -1,0 +1,4 @@
+liveness: strict 
+options:
+  max_actions: 15
+  max_concurrent_actions: 3
